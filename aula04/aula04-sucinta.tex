@@ -1,0 +1,649 @@
+%% ============================================================
+%% AULA 4 — Treinando a rede: risco empírico e descida de gradiente
+%% GBC073 — Inteligência Computacional
+%%
+%% Versão sucinta: roteiro do apresentador (poucas palavras,
+%% mesmas definições e figuras do aula04.tex)
+%%
+%% Baseada na Lecture 4 de 11-785 Introduction to Deep Learning (CMU),
+%% traduzida, condensada e modernizada (ênfase em PyTorch).
+%%
+%% Compilar:  latexmk -xelatex aula04-sucinta.tex   (XeLaTeX, duas passadas)
+%% ============================================================
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+\makeatletter
+\def\input@path{{./}{../}}
+\makeatother
+
+\usetheme{InteligenciaComputacional}   % ANTES do babel: fontspec vem primeiro
+\usepackage{babel}
+\babelprovide[import, main]{brazilian}
+
+% ---- código Python/PyTorch -------------------------------------------------
+\usepackage{listings}
+\lstdefinestyle{python}{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{icAzul}\bfseries,
+  commentstyle=\color{icCinza}\itshape,
+  stringstyle=\color{icVerde},
+  emph={torch,nn,optim,backward,step,zero_grad},
+  emphstyle=\color{icMagenta},
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=leftline,
+  framerule=2pt,
+  rulecolor=\color{icAzul!40},
+  xleftmargin=1em,
+}
+\lstset{style=python}
+
+\title[Aula 4 — Treinando a rede]{Aula 4: Treinando a rede — risco empírico e descida de gradiente}
+\subtitle[GBC073 — Inteligência Computacional]{Otimização \textbullet\ Gradientes \textbullet\ Funções de perda \textbullet\ PyTorch}
+\author[Prof.\ Marcelo Albertini]{Prof.\ Marcelo Keese Albertini}
+\institute{GBC073 — Inteligência Computacional \textbullet\ Universidade Federal de Uberlândia}
+\date{2026}
+
+\begin{document}
+
+% ------------------------------------------------------------ capa
+\begin{frame}[plain, noframenumbering]
+  \titlepage
+\end{frame}
+
+% ------------------------------------------------------------ roteiro
+\begin{frame}{Roteiro da aula}
+  \framesubtitle{Baseada na Lecture 4 do 11-785 (CMU) — traduzida, condensada e modernizada}
+  \begin{itemize}\setlength{\itemsep}{0.5ex}
+    \item<1-> A rede \emph{pode representar} quase qualquer função (aproximação
+          universal); hoje: \alert{como encontrar os pesos}
+    \item<2-> Treinar $=$ minimizar o \textbf{risco empírico} — problema de otimização
+    \item<3-> Ferramentas: derivadas, gradientes, Hessiana
+    \item<4-> O algoritmo: \textbf{descida de gradiente} (à mão e com \texttt{autograd})
+    \item<5-> Montando para redes: a rede $f$, as saídas, a \textbf{divergência}
+    \item<6-> O resultado que prepara a retropropagação:
+          $\nabla_{\vet{z}}\,\mathrm{div} = \hat{\vy} - \vy$
+  \end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Do risco empírico à otimização}
+
+% ------------------------------------------------------------
+\begin{frame}{Recapitulando: o problema de aprender}
+  \begin{defbox}{Minimização do risco empírico (ERM)}
+    Dado o treino $\D = \{(\vx_1, \vy_1), \dots, (\vx_T, \vy_T)\}$, escolha os
+    parâmetros que minimizam a divergência média entre saída e alvo:
+    \[
+      \widehat{\vw} = \argmin_{\vw}\; \erro(\vw), \qquad
+      \erro(\vw) = \frac{1}{T} \sum_{i=1}^{T}
+        \mathrm{div}\big( f(\vx_i;\, \vw),\; \vy_i \big)
+    \]
+  \end{defbox}
+
+  Perda \emph{empírica}: não conhecemos a distribuição real, só as amostras.
+
+  \begin{ideiabox}
+    Treinar \emph{é} minimizar uma função. Se $f$ e $\mathrm{div}$ forem
+    \alert{diferenciáveis}, dá para minimizar $\erro(\vw)$ seguindo o gradiente.
+  \end{ideiabox}
+\end{frame}
+
+% ============================================================
+\section{Derivadas, gradientes e mínimos}
+
+% ------------------------------------------------------------
+\begin{frame}{Derivada: o multiplicador local}
+  \begin{defbox}{Derivada como aproximação linear}
+    Em resolução fina, toda função suave é localmente linear:
+    \[
+      f(x + \Delta x) \;\approx\; f(x) + f'(x)\, \Delta x
+    \]
+    A derivada diz \emph{quanto a saída muda} por mudança minúscula na entrada.
+  \end{defbox}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item $f' > 0$: aumentar $x$ aumenta $f$;\; $f' < 0$: diminui;\;
+          $f' = 0$: localmente plana.\; $|f'|$: inclinação
+  \end{itemize}
+
+  \begin{ideiabox}
+    Leitura que o treino usa: o gradiente de $\erro$ em um peso diz se
+    \emph{aumentar aquele peso} aumenta ou diminui o erro — e o quanto.
+  \end{ideiabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Gradiente: derivada de função escalar de vetor}
+  \begin{defbox}{Gradiente}
+    Para $f : \R^n \to \R$:\;
+    $\nabla_{\vx} f = \big[ \deriv{f}{x_1} \;\cdots\; \deriv{f}{x_n} \big]^{\!\top}$,
+    \; com \; $\Delta f \approx \nabla_{\vx} f \cdot \Delta\vx$
+  \end{defbox}
+
+  \begin{columns}[T]
+    \begin{column}{0.52\textwidth}
+      \begin{teobox}{Direção de crescimento mais rápido}
+        $\nabla f \cdot \Delta\vx$ é máximo com $\Delta\vx$ \emph{alinhado} a
+        $\nabla f$: o gradiente aponta onde $f$ \alert{cresce mais rápido};
+        $-\nabla f$, onde decresce mais rápido.
+      \end{teobox}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \begin{center}
+        \begin{tikzpicture}[scale=0.72]
+          \draw[icAzul!30, thick] (0,0) ellipse (2.6 and 1.25);
+          \draw[icAzul!55, thick] (0,0) ellipse (1.7 and 0.82);
+          \draw[icAzul!85, thick] (0,0) ellipse (0.85 and 0.41);
+          \fill[icAzul] (0,0) circle (1.6pt);
+          \node[below, font=\scriptsize, text=icAzul] at (0,-0.05) {mínimo};
+          \node[circle, fill=icMagenta, inner sep=1.6pt] (p) at (1.7,0.82) {};
+          \draw[sinapse destac] (p) -- ++(0.95,0.46)
+            node[above, font=\scriptsize, text=icMagenta] {$\nabla f$};
+          \draw[sinapse] (p) -- ++(-0.95,-0.46)
+            node[below, font=\scriptsize, text=icCinza] {$-\nabla f$};
+        \end{tikzpicture}
+
+        {\scriptsize\color{icCinza} curvas de nível: $\nabla f$ é perpendicular a elas}
+      \end{center}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Mínimos: pontos críticos e a Hessiana}
+  \begin{teobox}{Condições de mínimo local (função suave)}
+    Em um mínimo local de $f : \R^n \to \R$:
+    \(\nabla f = \vet{0}\) (ponto crítico) e a \textbf{Hessiana}
+    \(\nabla^2 f\), matriz das segundas derivadas
+    \(\big[\nabla^2 f\big]_{ij} = \partial^2 f / \partial x_i \partial x_j\),
+    é \alert{positiva semidefinida} (autovalores $\geq 0$).
+  \end{teobox}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item Gradiente nulo não basta: máximos, mínimos, selas e inflexões
+          \emph{todos} têm $\nabla f = \vet{0}$ (em 1D: $f''>0$ em mínimos)
+  \end{itemize}
+
+  \begin{alertabox}
+    Em redes profundas ninguém verifica a Hessiana (milhões$^2$ de entradas):
+    aceita-se o ponto onde a descida estaciona. Em alta dimensão,
+    \alert{selas} são muito mais comuns que mínimos ruins.
+  \end{alertabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Pergunta para conduzir em aula}
+  \begin{quizbox}
+    $f(\vx)$ é escalar no vetor $\vx$. Partindo de $\vx_0$, em qual direção
+    dar um passo para obter a \emph{maior redução} de $f$?
+
+    \smallskip
+    \opcoes{Na direção de $\nabla f$ \;/\; Perpendicular a $\nabla f$ \;/\; Oposta a $\nabla f$}
+  \end{quizbox}
+
+  \pause
+
+  \begin{respbox}
+    \textbf{Oposta ao gradiente.} $\nabla f$ é a subida mais rápida; o oposto,
+    a descida mais rápida. Perpendicular: $f$ não muda (direção da curva de
+    nível). É o coração do algoritmo da próxima seção.
+  \end{respbox}
+\end{frame}
+
+% ============================================================
+\section{Descida de gradiente}
+
+% ------------------------------------------------------------
+\begin{frame}{Por que soluções iterativas?}
+  Para minimizar, resolver $\nabla_{\vw} \erro(\vw) = \vet{0}$ analiticamente\dots
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item Funciona em casos simples (regressão linear tem forma fechada);
+          com milhões de pesos e não linearidades compostas, o sistema é
+          \alert{intratável}
+  \end{itemize}
+
+  \begin{ideiabox}
+    A saída: começar de um \emph{chute} $\vw^{(0)}$ e refiná-lo passo a passo,
+    sempre na direção que reduz a perda. Duas decisões: \emph{que direção}
+    andar e \emph{qual o tamanho} do passo.
+  \end{ideiabox}
+
+  \begin{alertabox}
+    Todo o treinamento moderno — do Perceptron ao Transformer — é variante
+    desta ideia; muda como o passo é calculado (SGD, momento, Adam\dots).
+  \end{alertabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{O algoritmo}
+  \begin{algbox}{Descida de gradiente (\emph{gradient descent})}
+    \begin{itemize}\setlength{\itemsep}{0.2ex}
+      \item Inicialize $\vw^{(0)}$; $k \leftarrow 0$
+      \item Enquanto não convergir:
+            \(\;\vw^{(k+1)} \leftarrow \vw^{(k)} - \taxa\, \nabla_{\vw}\, \erro\big(\vw^{(k)}\big)\)
+      \item Parada:
+            \(\big|\erro(\vw^{(k+1)}) - \erro(\vw^{(k)})\big| < \epsilon_1\)
+            \;ou\; \(\norm{\nabla_{\vw} \erro}^2 < \epsilon_2\)
+    \end{itemize}
+  \end{algbox}
+
+  Anatomia do passo:
+  \[
+    \vw \leftarrow \vw
+      \;-\; \termo{\taxa}{taxa de aprendizado}
+      \;\cdot\; \termo{\nabla_{\vw}\, \erro(\vw)}{gradiente da perda}
+  \]
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item $\taxa$ pequena demais: lento \quad\textbullet\quad
+          $\taxa$ grande demais: oscila ou diverge
+    \item Função \textbf{convexa} $+$ $\taxa$ adequada $\Rightarrow$ mínimo
+          \alert{global}; caso contrário, mínimo local ou sela
+  \end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Em código: descida de gradiente à mão}
+  Minimizar $f(x) = x^2 - 4x + 5$ (mínimo em $x^* = 2$; $f'(x) = 2x - 4$):
+
+\begin{lstlisting}
+import torch
+
+x   = torch.tensor(8.0)        # chute inicial
+eta = 0.1                      # taxa de aprendizado
+for t in range(60):
+    grad = 2*x - 4             # derivada calculada a mao
+    x    = x - eta * grad      # passo: oposto ao gradiente
+print(x)                       # tensor(2.0000)
+\end{lstlisting}
+
+  \begin{ideiabox}
+    Cada linha do laço é a fórmula do slide anterior. O trabalho
+    ``inteligente'' foi derivar $f$ à mão — exatamente o que o
+    \texttt{autograd} elimina.
+  \end{ideiabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Em código: o mesmo, com autograd}
+\begin{lstlisting}
+x   = torch.tensor(8.0, requires_grad=True)
+opt = torch.optim.SGD([x], lr=0.1)
+
+for t in range(60):
+    loss = x**2 - 4*x + 5      # constroi o grafo de computacao
+    opt.zero_grad()            # zera gradientes acumulados
+    loss.backward()            # autograd: calcula d(loss)/dx
+    opt.step()                 # x <- x - lr * x.grad
+\end{lstlisting}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item \texttt{loss.backward()} percorre o grafo de trás para frente e
+          preenche \texttt{x.grad} — é a \alert{retropropagação} (próxima aula);
+          \texttt{opt.step()} aplica $\vw \leftarrow \vw - \taxa \nabla \erro$
+  \end{itemize}
+
+  \begin{alertabox}
+    Bug clássico: esquecer \texttt{opt.zero\_grad()}. O PyTorch \emph{acumula}
+    gradientes entre \texttt{backward()}s, e o passo passa a usar a soma de
+    todos eles.
+  \end{alertabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Convexidade: a garantia e a realidade}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{tcolorbox}[iccaixa=icCiano, title={O que a teoria garante}]
+        \begin{itemize}\setlength{\itemsep}{0.2ex}
+          \item Convexa $+$ passo adequado $\Rightarrow$ mínimo global
+          \item Base sólida: regressão linear, logística
+        \end{itemize}
+      \end{tcolorbox}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{tcolorbox}[iccaixa=icMagenta, title={O que o deep learning vive}]
+        \begin{itemize}\setlength{\itemsep}{0.2ex}
+          \item Perda de rede profunda: \alert{não convexa}
+          \item Milhões de mínimos locais e selas
+        \end{itemize}
+      \end{tcolorbox}
+    \end{column}
+  \end{columns}
+
+  \medskip
+  \begin{ideiabox}
+    Por que funciona? Em redes \emph{superparametrizadas}, quase todos os
+    mínimos locais têm perda próxima da ótima. O problema prático não é
+    ``cair no mínimo errado'', é caminhar eficientemente na paisagem — daí os
+    otimizadores modernos.
+  \end{ideiabox}
+\end{frame}
+
+% ============================================================
+\section{Montando o problema para redes neurais}
+
+% ------------------------------------------------------------
+\begin{frame}{Três coisas a definir}
+  \[
+    \widehat{\vw} = \argmin_{\vw}\; \frac{1}{T} \sum_{i=1}^{T}
+      \mathrm{div}\big( f(\vx_i;\, \vw),\; \vy_i \big)
+  \]
+
+  \begin{columns}[T]
+    \begin{column}{0.31\textwidth}
+      \begin{tcolorbox}[iccaixa=icAzul, title={A rede $f(\cdot\,; \vw)$}]
+        \small Qual arquitetura? Quais são os parâmetros $\vw$?
+      \end{tcolorbox}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \begin{tcolorbox}[iccaixa=icCiano, title={Os pares $(\vx_i, \vy_i)$}]
+        \small Como representar entradas e saídas como números?
+      \end{tcolorbox}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \begin{tcolorbox}[iccaixa=icMagenta, title={A divergência}]
+        \small Como medir o erro entre $\hat{\vy}$ e $\vy$? Precisa ser diferenciável!
+      \end{tcolorbox}
+    \end{column}
+  \end{columns}
+
+  \medskip
+  O resto da aula responde às três perguntas, uma por vez.
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{A rede $f$: o MLP e sua notação}
+  \begin{columns}[T]
+    \begin{column}{0.54\textwidth}
+      \begin{itemize}\setlength{\itemsep}{0.3ex}
+        \item Rede \emph{direta} (\emph{feedforward}) em camadas, sem laços;
+              a entrada é a camada $0$ (sem neurônios: são os dados)
+        \item $y_j^{(k)}$: saída do neurônio $j$ da camada $k$;\;
+              $\pesoij{i}{j}^{(k)}$: peso do neurônio $i$ da camada $k{-}1$ ao
+              $j$ da camada $k$; viés $b_j^{(k)}$
+        \item Cada neurônio: $\campo = \vw^{\!\top}\vx + b$,\; $y = \ativ(\campo)$
+              — afim $+$ ativação \alert{diferenciável}
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{center}
+        \scalebox{0.52}{\mlp{4,5,5,3}}
+
+        {\color{icCinza}\scriptsize entrada em ciano, ocultas em azul, saída em rosa}
+      \end{center}
+    \end{column}
+  \end{columns}
+
+  \begin{ideiabox}
+    Todos os pesos e vieses juntos formam o vetor gigante $\vw$ do gradiente.
+    Rede moderna: milhões a trilhões de coordenadas, mesmo algoritmo.
+  \end{ideiabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Ativações e suas derivadas}
+  A descida de gradiente exige derivar tudo — inclusive as ativações:
+  \begin{center}\small
+    $\sig(z) = 1/(1+e^{-z})$,\; $\sig' = \sig(1-\sig)$
+    \qquad
+    $\tanh' = 1 - \tanh^2$
+    \qquad
+    $\relu(z) = \max(0, z)$,\; $\relu'(z) = [z > 0]$
+  \end{center}
+
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{tcolorbox}[iccaixa=icCinza, title={Histórico}]
+        \small Sigmoide e $\tanh$ nas ocultas dominaram até $\sim$2012.
+        Saturam: derivada $\approx 0$ longe da origem.
+      \end{tcolorbox}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{tcolorbox}[iccaixa=icVerde, title={Moderno}]
+        \small Família ReLU (ReLU, GELU, SiLU) é o padrão nas ocultas:
+        não satura no lado positivo.
+      \end{tcolorbox}
+    \end{column}
+  \end{columns}
+
+  \begin{alertabox}
+    Ativação saturada $\Rightarrow$ gradiente $\approx 0$ $\Rightarrow$ o peso
+    \alert{para de aprender} (\emph{desvanecimento do gradiente}) — foi o que
+    tirou a sigmoide das ocultas; hoje ela vive quase só na saída binária.
+  \end{alertabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Ativações vetoriais: softmax}
+  \begin{defbox}{Softmax}
+    Acopla todas as saídas da camada, transformando os valores afins
+    $z_1, \dots, z_K$ (os \emph{logits}) em distribuição de probabilidade:
+    \[
+      \hat{y}_i = \frac{e^{z_i}}{\sum_{j=1}^{K} e^{z_j}}
+      \qquad\Longrightarrow\qquad
+      \hat{y}_i > 0, \;\; \sum_i \hat{y}_i = 1
+    \]
+  \end{defbox}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item Mudar \emph{um} peso afeta \emph{todas} as saídas (``vetorial'');
+          padrão na saída multiclasse: $\hat{y}_i = P(\text{classe } i)$
+  \end{itemize}
+
+  \begin{ideiabox}
+    O softmax reaparece no coração dos Transformers: a \emph{atenção} o usa
+    para converter escores de similaridade em pesos que somam 1.
+  \end{ideiabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Representando as saídas $\vy$}
+  \begin{itemize}\setlength{\itemsep}{0.4ex}
+    \item \textbf{Regressão} (saída real): use o valor direto; um neurônio por
+          dimensão, saída linear
+    \item \textbf{Binária} (``é um gato?''): alvo $y \in \{0, 1\}$, saída
+          sigmoide $\hat{y} \in (0,1)$ lida como $P(\text{classe} = 1)$
+    \item \textbf{Multiclasse}: alvo \emph{one-hot}, saída softmax
+  \end{itemize}
+
+  \begin{defbox}{Vetor one-hot}
+    Para $K$ classes em ordem fixa, a classe $c$ vira o vetor com 1 na posição
+    $c$ e 0 nas demais. Com classes [gato, cão, camelo, chapéu, flor]:
+    \[
+      \text{camelo} \;\mapsto\; \vy = (0,\, 0,\, 1,\, 0,\, 0)^{\!\top}
+    \]
+  \end{defbox}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item A rede produz $\hat{\vy}$: $K$ probabilidades que somam 1; ideal:
+          $\hat{\vy} = $ one-hot; na prática: máxima massa na classe certa
+  \end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Em código: a rede $f$ em PyTorch}
+  Classificador de dígitos (entrada $28 \times 28 = 784$ pixels, 10 classes):
+
+\begin{lstlisting}
+import torch.nn as nn
+
+modelo = nn.Sequential(
+    nn.Linear(784, 256), nn.ReLU(),   # camada oculta 1
+    nn.Linear(256, 128), nn.ReLU(),   # camada oculta 2
+    nn.Linear(128, 10),               # saida: 10 logits
+)
+
+logits = modelo(x)                    # x: tensor (B, 784)
+\end{lstlisting}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item Cada \texttt{nn.Linear} guarda pesos e viés — as coordenadas de $\vw$;
+          \texttt{modelo.parameters()} entrega todas ao otimizador
+    \item \alert{Sem softmax na saída}: a rede devolve \emph{logits} —
+          o porquê fica claro em dois slides
+  \end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Divergências: medindo o erro}
+
+% ------------------------------------------------------------
+\begin{frame}{Regressão: divergência L2}
+  \begin{defbox}{Divergência L2 (erro quadrático)}
+    Para saídas reais, a distância euclidiana ao quadrado (escalada):
+    \[
+      \mathrm{div}(\hat{\vy}, \vy) = \frac{1}{2} \norm{\vy - \hat{\vy}}^2
+             = \frac{1}{2} \sum_i (y_i - \hat{y}_i)^2
+      \qquad\Longrightarrow\qquad
+      \deriv{\mathrm{div}}{\hat{\vy}} = \hat{\vy} - \vy
+    \]
+  \end{defbox}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item Diferenciável, e a derivada é o \alert{erro} — o $\tfrac{1}{2}$ só
+          cancela o 2 da derivada. Em PyTorch: \texttt{nn.MSELoss()}
+  \end{itemize}
+
+  \begin{alertabox}
+    Para \emph{classificação}, a L2 é ruim: com sigmoide/softmax gera
+    gradientes minúsculos justo quando a rede está muito errada.
+  \end{alertabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Classificação: KL e entropia cruzada}
+  \begin{defbox}{Entropia cruzada (\emph{cross-entropy})}
+    Para alvo one-hot $\vy$ (classe correta $c$) e saída softmax $\hat{\vy}$:
+    \[
+      \mathrm{div}(\hat{\vy}, \vy)
+        = -\sum_i y_i \log \hat{y}_i
+        = -\log \hat{y}_c
+      \qquad
+      \deriv{\mathrm{div}}{\hat{y}_i} =
+        \begin{cases} -1/\hat{y}_c & i = c \\ 0 & i \neq c \end{cases}
+    \]
+  \end{defbox}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item Minimizar $-\log \hat{y}_c$ $=$ maximizar a probabilidade da classe
+          correta (máxima verossimilhança); com alvo one-hot, KL e entropia
+          cruzada \alert{coincidem}
+  \end{itemize}
+
+  \begin{ideiabox}
+    A entropia cruzada \emph{explode} quando $\hat{y}_c \to 0$: gradiente
+    enorme quando a rede está confiante e errada. Esse castigo acelera a
+    convergência — é a perda de todo classificador e modelo de linguagem moderno.
+  \end{ideiabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Pergunta para conduzir em aula}
+  \begin{quizbox}
+    A entropia cruzada atinge o mínimo quando $\hat{\vy} = \vy$. Portanto,
+    nesse ponto, a derivada $\partial\,\mathrm{div} / \partial \hat{y}_c$ é
+    zero — como na L2.
+
+    \smallskip
+    \opcoes{Verdadeiro \;/\; Falso}
+  \end{quizbox}
+
+  \pause
+
+  \begin{respbox}
+    \textbf{Falso.} No mínimo ($\hat{y}_c = 1$) a derivada vale
+    $-1/\hat{y}_c = -1 \neq 0$. O mínimo existe porque $\hat{y}_c$ não passa
+    de 1 (restrição do softmax), não porque a curva aplaina. O gradiente
+    segue ``empurrando'' $\hat{y}_c$ mesmo perto do acerto — em relação aos
+    \emph{logits}, porém, $\hat{\vy} - \vy$ zera direitinho.
+  \end{respbox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{O resultado central da aula}
+  \framesubtitle{O gradiente em relação aos logits é o erro}
+
+  Encadeando softmax $+$ entropia cruzada e derivando nos valores afins
+  $\vet{z}$ (logits) que entram no softmax, quase tudo cancela:
+  \[
+    \mathrm{div} = -\log \hat{y}_c, \quad \hat{\vy} = \mathrm{softmax}(\vet{z})
+    \qquad\Longrightarrow\qquad
+    \mdestaque{icMagenta}{\nabla_{\vet{z}}\, \mathrm{div} = \hat{\vy} - \vy}
+  \]
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item O mesmo vale para saída linear $+$ L2: gradiente $= \hat{\vy} - \vy$
+    \item O que se propaga para trás a partir da saída é simplesmente
+          \alert{o erro}: probabilidade prevista menos alvo
+  \end{itemize}
+
+  \begin{ideiabox}
+    Não é coincidência: L2$\,\leftrightarrow\,$linear e entropia
+    cruzada$\,\leftrightarrow\,$softmax são pares ``casados''. É o primeiro
+    elo da cadeia que a retropropagação estende por toda a rede na próxima aula.
+  \end{ideiabox}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}[fragile]{Em código: a perda em PyTorch}
+\begin{lstlisting}
+criterio = nn.CrossEntropyLoss()  # log-softmax + NLL, tudo em um
+
+logits = modelo(x)                # (B, 10) -- SEM softmax antes!
+perda  = criterio(logits, alvo)   # alvo: indices (B,), nao one-hot
+
+perda.backward()                  # gradiente flui: comeca em y_hat - y
+\end{lstlisting}
+
+  \begin{alertabox}
+    Erro clássico: \texttt{nn.Softmax} na rede \emph{e} \texttt{CrossEntropyLoss}.
+    A perda já embute o softmax (estável, via \texttt{log-sum-exp}); softmax
+    duplo achata os gradientes e o treino ``anda de lado''.
+  \end{alertabox}
+
+  \begin{itemize}\setlength{\itemsep}{0.2ex}
+    \item \texttt{CrossEntropyLoss(label\_smoothing=0.1)}: alvo suavizado
+          ($1-\epsilon$ na classe certa, $\epsilon/(K{-}1)$ nas demais) —
+          regularização moderna, usada em Transformers
+  \end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Fechamento}
+
+% ------------------------------------------------------------
+\begin{frame}{Resumo da aula}
+  \begin{itemize}\setlength{\itemsep}{0.45ex}
+    \item Redes são aproximadores universais; treiná-las é \textbf{minimizar
+          o risco empírico} — um problema de otimização
+    \item O \textbf{gradiente} aponta a subida mais rápida; a \textbf{descida
+          de gradiente} caminha no sentido oposto:
+          $\vw \leftarrow \vw - \taxa \nabla_{\vw} \erro$
+    \item Rede ($f$ diferenciável), saídas (real / sigmoide / one-hot $+$
+          softmax) e divergências (\textbf{L2}; \textbf{entropia cruzada})
+          definidas; nos pares casados, o gradiente na saída é o erro:
+          $\nabla_{\vet{z}}\, \mathrm{div} = \hat{\vy} - \vy$
+    \item Próxima aula: \textbf{retropropagação} — levar $\hat{\vy} - \vy$
+          da saída até cada peso da rede
+  \end{itemize}
+\end{frame}
+
+% ------------------------------------------------------------
+\begin{frame}{Exercício}
+  \begin{exbox}{1 — Softmax e entropia cruzada}
+    Com logits $\vet{z} = (2,\, 0,\, -1)$ e classe correta $c = 1$:
+    \begin{itemize}\setlength{\itemsep}{0.2ex}
+      \item[(a)] calcule $\hat{\vy} = \mathrm{softmax}(\vet{z})$;
+      \item[(b)] calcule a perda $-\log \hat{y}_1$;
+      \item[(c)] calcule $\nabla_{\vet{z}}\,\mathrm{div} = \hat{\vy} - \vy$ e
+                 verifique que as componentes somam zero. Confira com \texttt{torch}.
+    \end{itemize}
+  \end{exbox}
+\end{frame}
+
+\end{document}
