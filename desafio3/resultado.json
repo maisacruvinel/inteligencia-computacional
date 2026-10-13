@@ -1,0 +1,56 @@
+{
+ "vencedor": {
+  "otimizador": "adamw",
+  "lr": 0.003,
+  "agenda": "cosine",
+  "lr_adamw": null,
+  "media": 0.9984444444444445,
+  "desvio": 0.0010183501544346522
+ },
+ "confirmacoes": [
+  {
+   "otimizador": "adamw",
+   "lr": 0.003,
+   "agenda": "cosine",
+   "lr_adamw": null,
+   "media": 0.9984444444444445,
+   "desvio": 0.0010183501544346522
+  },
+  {
+   "otimizador": "muon",
+   "lr": 0.06,
+   "agenda": "cosine",
+   "lr_adamw": 0.003,
+   "media": 0.9982222222222222,
+   "desvio": 0.0003849001794597722
+  },
+  {
+   "otimizador": "adamw",
+   "lr": 0.003,
+   "agenda": "wsd",
+   "lr_adamw": null,
+   "media": 0.9980000000000001,
+   "desvio": 0.0006666666666667043
+  }
+ ],
+ "baseline": {
+  "otimizador": "adam",
+  "lr": 0.001,
+  "agenda": "const",
+  "lr_adamw": null,
+  "media": 0.9962222222222222,
+  "desvio": 0.0013877773329773935
+ },
+ "ganho": 0.0022222222222222365,
+ "ganho_maior_que_desvio": true,
+ "vencedor_vs_segundo": 0.00022222222222223476,
+ "melhor_lr": {
+  "adamw": 0.003,
+  "adam": 0.003,
+  "sgdm": 0.03,
+  "sgdm_nesterov": 0.1,
+  "rmsprop": 0.003,
+  "muon": 0.06
+ },
+ "lr_adamw_usado_no_muon": 0.003
+}
